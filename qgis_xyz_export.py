@@ -8,19 +8,19 @@ Single-step export → mosaics:
     export_bbox_to_geotiff_tiles(
         layer_name="Google Satellite Images",
         top_left=(-117, 44), bottom_right=(-112, 40),
-        zoom=14,
-        out_dir=r"F:\TIF",
+        zoom=12,
+        out_dir=r"F:\TIF\mosaic",
         # Mosaic controls:
         tiles_per_side=128,          # try 128 first; raise to 144/160 if you want bigger files
-        mosaic_internal_tiled=True,  # strongly recommended for multi-GB files
+        mosaic_internal_tiled=False,  # strongly recommended for multi-GB files
         mosaic_blocksize=512,        # 256 or 512
-        # Cache controls:
+        # Cache controls:`
         tile_cache_dir=None,         # default: <out_dir>\_tilecache
         keep_tile_cache=False,       # set True to keep per-tile GeoTIFFs
         # Perf/codec:
         zlevel=9,                    # DEFLATE level for both per-tile and mosaic
         chunk_size=20, pause_secs=0.7,
-        verbose=True
+        verbose=False
     )
 
 Notes:
@@ -299,9 +299,8 @@ def export_bbox_to_geotiff_tiles(
                     processed += 1
                     batch += 1
                     if batch >= chunk_size:
-                        if verbose:
-                            done = processed + skipped
-                            print(f"[pause] tiles done={done}/{total_tiles}; sleeping {pause_secs}s...")
+                        done = processed + skipped
+                        print(f"[pause] tiles done={done}/{total_tiles}; sleeping {pause_secs}s...")
                         time.sleep(pause_secs)
                         batch = 0
         if verbose: print(f"[tiles] new={processed} skipped={skipped} total={total_tiles}")
