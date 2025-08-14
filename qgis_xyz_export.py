@@ -1,14 +1,16 @@
 """
 qgis_xyz_export.py — One-step: export XYZ tiles to DEFLATE GeoTIFF mosaics (Web Mercator WKT1).
 
+Add XYZ Tile Source as Layer
+
 Load in QGIS Python Console (Windows example):
-    exec(open(r"F:\qgis_scripts\qgis_xyz_export.py").read())
+    exec(open(r"<dir>\qgis_xyz_export.py").read())
 
 Single-step run example:
     export_bbox_to_geotiff_tiles(
-        layer_name="Google Satellite Images",
-        top_left=(-117, 44), bottom_right=(-116.95, 43.95),
-        zoom=15,                       # detect max zoom from layer (fallback 19)
+        layer_name="<Name of XYZ Tile Layer>",
+        top_left=(1, 1), bottom_right=(-1, -1),
+        zoom=15,                         # detect max zoom from layer (fallback 19)
         out_dir=r"F:\TIF\mosaic",
         # Mosaic controls:
         tiles_per_side=128,              # try 128; bump to 144/160 for larger files
