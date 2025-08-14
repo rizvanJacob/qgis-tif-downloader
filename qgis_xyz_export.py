@@ -6,6 +6,21 @@ Add XYZ Tile Source as Layer
 Load in QGIS Python Console (Windows example):
     exec(open(r"<dir>\qgis_xyz_export.py").read())
 
+Step to build cache:
+    build_tile_cache(
+        layer_name="<Name of XYZ Tile Layer>",
+        top_left=(1, 1), bottom_right=(-1, -1),
+        zoom=15,                         # detect max zoom from layer (fallback 19)
+        out_dir=r"F:\TIF\mosaic",
+        # Cache configuration:
+        tile_cache_dir=None,             # default: <out_dir>\_tilecache
+        # Codec & performance:
+        zlevel=9,                        # DEFLATE level for tiles & mosaics
+        chunk_size=50, pause_secs=0.2,   # throttling for tile rendering
+        dry_run=False,
+        verbose=False
+    )    
+
 Single-step run example:
     export_bbox_to_geotiff_tiles(
         layer_name="<Name of XYZ Tile Layer>",
@@ -351,7 +366,7 @@ def build_tile_cache(
                             print(f"[pause] tiles done={done}/{total_tiles}; sleeping {pause_secs}s...")
                         time.sleep(pause_secs)
                         batch = 0
-            print(f"[tiles] row {i}: new={processed} skipped={skipped} total={total_tiles}")
+            print(f"[tiles] row {x}: new={processed} skipped={skipped} total={total_tiles}")
 
     return {
         "tile_cache_dir": tile_cache_dir,
