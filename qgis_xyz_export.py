@@ -279,21 +279,13 @@ def _build_mosaic(tile_paths, mosaic_path, internal_tiled=True, blocksize=512,
     vrt_ds = None
     return mosaic_path
 
-# -------------------------------------------
-# One-step export: tiles (cache) → mosaics (out_dir)
-# -------------------------------------------
-def export_bbox_to_geotiff_tiles(
+def build_tile_cache(
     layer_name,
     top_left, bottom_right,
     zoom=None,
     out_dir=".",
-    # Mosaic configuration:
-    tiles_per_side=128,
-    mosaic_internal_tiled=True,
-    mosaic_blocksize=512,
     # Cache configuration:
     tile_cache_dir=None,
-    keep_tile_cache=False,
     # Codec & performance:
     zlevel=9,
     chunk_size=20,
@@ -302,12 +294,15 @@ def export_bbox_to_geotiff_tiles(
     verbose=True
 ):
     """
-    1) Render per-XYZ tiles for bbox into a resume-friendly cache (strip-based, DEFLATE).
-    2) Build mosaics of (tiles_per_side x tiles_per_side) into out_dir (internally tiled by default).
-    3) Optionally delete the tile cache.
+    Render per-XYZ tiles for bbox into a resume-friendly cache (strip-based, DEFLATE).
 
-    Mosaic filenames:
-      <out_dir>/z<zoom>_x<x0>-<x1>_y<y0>-<y1>.tif
+    Returns:
+      {
+        "tile_cache_dir": <resolved cache dir>,
+        "zoom": <zoom used>,
+        "x_min": int, "x_max": int,
+        "y_min": int, "y_max": int
+      }
     """
     if dry_run is None:
         dry_run = DRY_RUN_MODE
@@ -332,7 +327,7 @@ def export_bbox_to_geotiff_tiles(
     print(f"[run] layer='{layer_name}' zoom={zoom} tiles={total_tiles} dry_run={dry_run}")
     print(f"[cache] {tile_cache_dir}")
 
-    # 1) Render tiles to cache
+    # Render tiles to cache
     if dry_run:
         print("[dry_run] Skipping tile rendering.")
     else:
@@ -356,7 +351,58 @@ def export_bbox_to_geotiff_tiles(
                             print(f"[pause] tiles done={done}/{total_tiles}; sleeping {pause_secs}s...")
                         time.sleep(pause_secs)
                         batch = 0
-        if verbose: print(f"[tiles] new={processed} skipped={skipped} total={total_tiles}")
+            if verbose:
+                print(f"[tiles] row {i}: new={processed} skipped={skipped} total={total_tiles}")
+
+    return {
+        "tile_cache_dir": tile_cache_dir,
+        "zoom": zoom,
+        "x_min": x_min, "x_max": x_max,
+        "y_min": y_min, "y_max": y_max
+    }
+
+
+# -------------------------------------------
+# One-step export: tiles (cache) → mosaics (out_dir)
+# -------------------------------------------
+def export_bbox_to_geotiff_tiles(
+    layer_name,
+    top_left, bottom_right,
+    zoom=None,
+    out_dir=".",
+    # Mosaic configuration:
+    tiles_per_side=128,
+    mosaic_internal_tiled=True,
+    mosaic_blocksize=512,
+    # Cache configuration:
+    tile_cache_dir=None,
+    keep_tile_cache=False,
+    # Codec & performance:
+    zlevel=9,
+    chunk_size=20,
+    pause_secs=1.0,
+    dry_run=None,
+    verbose=True
+):
+    # 1) Build Tile Cache (or skip if dry_run)
+    info = build_tile_cache(
+        layer_name=layer_name,
+        top_left=top_left, bottom_right=bottom_right,
+        zoom=zoom,
+        out_dir=out_dir,
+        tile_cache_dir=tile_cache_dir,
+        zlevel=zlevel,
+        chunk_size=chunk_size,
+        pause_secs=pause_secs,
+        dry_run=dry_run,
+        verbose=verbose
+    )
+
+    # Unpack what we need for mosaicking
+    tile_cache_dir = info["tile_cache_dir"]
+    zoom = info["zoom"]
+    x_min, x_max = info["x_min"], info["x_max"]
+    y_min, y_max = info["y_min"], info["y_max"]
 
     # 2) Build mosaics into out_dir
     print("[mosaic] building mosaics...")
@@ -376,10 +422,12 @@ def export_bbox_to_geotiff_tiles(
                 continue
             print(f"[mosaic] {mosaic_name} from {len(tile_paths)} tiles")
             if not dry_run:
-                _build_mosaic(tile_paths, mosaic_path,
-                              internal_tiled=mosaic_internal_tiled,
-                              blocksize=mosaic_blocksize,
-                              compress="DEFLATE", zlevel=zlevel, predictor=2, bigtiff="YES")
+                _build_mosaic(
+                    tile_paths, mosaic_path,
+                    internal_tiled=mosaic_internal_tiled,
+                    blocksize=mosaic_blocksize,
+                    compress="DEFLATE", zlevel=zlevel, predictor=2, bigtiff="YES"
+                )
             made.append(mosaic_path)
 
     print(f"[mosaic done] wrote {len(made)} mosaics into {out_dir}")
@@ -394,3 +442,4 @@ def export_bbox_to_geotiff_tiles(
             print(f"[warn] cache cleanup failed: {e}")
 
     return made
+
