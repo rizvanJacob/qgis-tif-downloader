@@ -351,8 +351,7 @@ def build_tile_cache(
                             print(f"[pause] tiles done={done}/{total_tiles}; sleeping {pause_secs}s...")
                         time.sleep(pause_secs)
                         batch = 0
-            if verbose:
-                print(f"[tiles] row {i}: new={processed} skipped={skipped} total={total_tiles}")
+            print(f"[tiles] row {i}: new={processed} skipped={skipped} total={total_tiles}")
 
     return {
         "tile_cache_dir": tile_cache_dir,
