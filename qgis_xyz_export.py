@@ -185,51 +185,69 @@ def bbox_to_tile_range(top_left, bottom_right, zoom):
 # Single-tile renderer (strip-based DEFLATE GeoTIFF into cache)
 # -------------------------------------------
 def _render_one_tile(rlayer, z, x, y, cache_dir, zlevel=9, verbose=True):
+    # Compute exact Web Mercator bounds for this XYZ tile
     minx, miny, maxx, maxy = merc_bounds_for_tile(x, y, z)
+
+    # Output paths in the cache
     tile_dir = os.path.join(cache_dir, str(z), str(x))
     os.makedirs(tile_dir, exist_ok=True)
     tmp_png = os.path.join(tile_dir, f"{y}_tmp.png")
     out_tif = os.path.join(tile_dir, f"{y}.tif")
 
+    # Skip if already done
     if os.path.exists(out_tif):
         if verbose: print(f"[tile skip] {z}/{x}/{y}")
         return out_tif
 
+    # --- Render the tile (force opaque RGB) ---
     width = height = DEFAULT_TILE_SIZE
+
     ms = QgsMapSettings()
     ms.setLayers([rlayer])
     ms.setDestinationCrs(WEBMERC)
     ms.setExtent(QgsRectangle(minx, miny, maxx, maxy))
     ms.setOutputSize(QSize(width, height))
 
-    img = QImage(width, height, _FMT_ARGB32)
-    img.fill(QColor("white"))
+    # Use RGB32 (alpha byte is present but always 0xFF -> opaque)
+    try:
+        fmt_rgb = QImage.Format_RGB32
+    except AttributeError:
+        # Qt6 path
+        fmt_rgb = getattr(getattr(QImage, "Format", QImage), "Format_RGB32", _FMT_ARGB32)
+
+    img = QImage(width, height, fmt_rgb)
+    img.fill(QColor("white"))  # ensure any empty pixels are opaque white
+
     painter = QPainter(img)
     job = QgsMapRendererCustomPainterJob(ms, painter)
-    job.start(); job.waitForFinished(); painter.end()
+    job.start()
+    job.waitForFinished()
+    painter.end()
 
     if verbose: print(f"[render] -> {tmp_png}")
     if not img.save(tmp_png, "PNG"):
         raise RuntimeError(f"Failed to save temp PNG: {tmp_png}")
 
-    # Stamp georef using WKT1/GDAL (no EPSG lookup)
+    # --- PNG -> GeoTIFF (force 3-band RGB, no alpha), embed Web Mercator (WKT1) ---
     translate_opts = gdal.TranslateOptions(
         options = [
             "-a_srs", WEBMERC_WKT1_EPSG_3857,
             "-a_ullr", str(minx), str(maxy), str(maxx), str(miny),
+            "-b", "1", "-b", "2", "-b", "3",          # drop any alpha from PNG just in case
+            "-co", "PHOTOMETRIC=RGB",                 # make intent explicit
             "-co", "COMPRESS=DEFLATE",
             "-co", "PREDICTOR=2",
             "-co", "BIGTIFF=IF_SAFER",
             "-co", f"ZLEVEL={zlevel}",
         ],
-        format = "GTiff"
+        format="GTiff",
     )
 
-    # Try once; if env flips mid-run, reassert and retry
     try:
         if verbose: print(f"[compress] gdal.Translate -> {out_tif}")
         ds_out = gdal.Translate(out_tif, tmp_png, options=translate_opts)
     except Exception as e:
+        # Reassert env and retry once (guards against external env churn)
         _ensure_gdal_proj_env()
         if verbose: print(f"[warn] Translate failed ({e}); retrying...")
         ds_out = gdal.Translate(out_tif, tmp_png, options=translate_opts)
@@ -238,15 +256,17 @@ def _render_one_tile(rlayer, z, x, y, cache_dir, zlevel=9, verbose=True):
         raise RuntimeError("gdal.Translate returned None.")
     ds_out = None
 
-    # Cleanup PNG + aux.xml
+    # Cleanup temp files
     try:
         os.remove(tmp_png)
         aux = tmp_png + ".aux.xml"
-        if os.path.exists(aux): os.remove(aux)
+        if os.path.exists(aux):
+            os.remove(aux)
     except Exception:
         pass
 
     return out_tif
+
 
 # -------------------------------------------
 # Mosaic helpers (VRT -> GTiff)
