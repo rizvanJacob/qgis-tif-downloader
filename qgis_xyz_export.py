@@ -191,7 +191,7 @@ def _render_one_tile(rlayer, z, x, y, cache_dir, zlevel=9, verbose=True):
     # Output paths in the cache
     tile_dir = os.path.join(cache_dir, str(z), str(x))
     os.makedirs(tile_dir, exist_ok=True)
-    tmp_png = os.path.join(tile_dir, f"{y}_tmp.png")
+    tmp_bmp = os.path.join(tile_dir, f"{y}_tmp.bmp")   # <-- BMP, not PNG
     out_tif = os.path.join(tile_dir, f"{y}.tif")
 
     # Skip if already done
@@ -208,33 +208,30 @@ def _render_one_tile(rlayer, z, x, y, cache_dir, zlevel=9, verbose=True):
     ms.setExtent(QgsRectangle(minx, miny, maxx, maxy))
     ms.setOutputSize(QSize(width, height))
 
-    # Use RGB32 (alpha byte is present but always 0xFF -> opaque)
+    # Use RGB32 (alpha byte present but opaque)
     try:
         fmt_rgb = QImage.Format_RGB32
     except AttributeError:
-        # Qt6 path
         fmt_rgb = getattr(getattr(QImage, "Format", QImage), "Format_RGB32", _FMT_ARGB32)
 
     img = QImage(width, height, fmt_rgb)
-    img.fill(QColor("white"))  # ensure any empty pixels are opaque white
+    img.fill(QColor("white"))  # ensure any empty pixels are opaque
 
     painter = QPainter(img)
     job = QgsMapRendererCustomPainterJob(ms, painter)
-    job.start()
-    job.waitForFinished()
-    painter.end()
+    job.start(); job.waitForFinished(); painter.end()
 
-    if verbose: print(f"[render] -> {tmp_png}")
-    if not img.save(tmp_png, "PNG"):
-        raise RuntimeError(f"Failed to save temp PNG: {tmp_png}")
+    if verbose: print(f"[render] -> {tmp_bmp}")
+    if not img.save(tmp_bmp, "BMP"):    # <-- write BMP (no zlib)
+        raise RuntimeError(f"Failed to save temp BMP: {tmp_bmp}")
 
-    # --- PNG -> GeoTIFF (force 3-band RGB, no alpha), embed Web Mercator (WKT1) ---
+    # --- BMP -> GeoTIFF (force 3-band RGB), embed Web Mercator (WKT1) ---
     translate_opts = gdal.TranslateOptions(
-        options = [
+        options=[
             "-a_srs", WEBMERC_WKT1_EPSG_3857,
             "-a_ullr", str(minx), str(maxy), str(maxx), str(miny),
-            "-b", "1", "-b", "2", "-b", "3",          # drop any alpha from PNG just in case
-            "-co", "PHOTOMETRIC=RGB",                 # make intent explicit
+            "-b", "1", "-b", "2", "-b", "3",      # ensure RGB only
+            "-co", "PHOTOMETRIC=RGB",
             "-co", "COMPRESS=DEFLATE",
             "-co", "PREDICTOR=2",
             "-co", "BIGTIFF=IF_SAFER",
@@ -245,12 +242,12 @@ def _render_one_tile(rlayer, z, x, y, cache_dir, zlevel=9, verbose=True):
 
     try:
         if verbose: print(f"[compress] gdal.Translate -> {out_tif}")
-        ds_out = gdal.Translate(out_tif, tmp_png, options=translate_opts)
+        ds_out = gdal.Translate(out_tif, tmp_bmp, options=translate_opts)
     except Exception as e:
-        # Reassert env and retry once (guards against external env churn)
+        # Reassert env and retry once (guards against external churn, though BMP avoids zlib)
         _ensure_gdal_proj_env()
         if verbose: print(f"[warn] Translate failed ({e}); retrying...")
-        ds_out = gdal.Translate(out_tif, tmp_png, options=translate_opts)
+        ds_out = gdal.Translate(out_tif, tmp_bmp, options=translate_opts)
 
     if ds_out is None:
         raise RuntimeError("gdal.Translate returned None.")
@@ -258,8 +255,8 @@ def _render_one_tile(rlayer, z, x, y, cache_dir, zlevel=9, verbose=True):
 
     # Cleanup temp files
     try:
-        os.remove(tmp_png)
-        aux = tmp_png + ".aux.xml"
+        os.remove(tmp_bmp)
+        aux = tmp_bmp + ".aux.xml"
         if os.path.exists(aux):
             os.remove(aux)
     except Exception:
